@@ -69,8 +69,8 @@ static void notifyCallback(
   notify_time = time(NULL);
 
   sendToHass(sensor_id_temp, String(temp));
-  sendToHass(sensor_id_tvoc, String(tvoc));
-  sendToHass(sensor_id_hcho, String(hcho));
+  sendToHass(sensor_id_tvoc, String(tvoc, 3));
+  sendToHass(sensor_id_hcho, String(hcho, 3));
   sendToHass(sensor_id_co2, String(co2));
 }
 
