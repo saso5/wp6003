@@ -1,10 +1,10 @@
-//#include <M5StickC.h>
-#include "M5Atom.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <time.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 bool   notified = false;
 time_t notify_time;
@@ -15,7 +15,7 @@ bool deviceConnected = false;
 #define SERVICE_UUID "0000FFF0-0000-1000-8000-00805F9B34FB"
 #define COMMAND_UUID "0000FFF1-0000-1000-8000-00805F9B34FB"
 #define SENSOR_UUID  "0000FFF4-0000-1000-8000-00805F9B34FB"
-#define DEVICE_NAME  "6003#XXXXXXXXXXXXX" // Your WP6003 device name
+#define DEVICE_NAME  "6003#060030393CEE3" // Your WP6003 device name
 
 static BLEUUID  serviceUUID(SERVICE_UUID);
 static BLEUUID  commandUUID(COMMAND_UUID);
@@ -26,6 +26,16 @@ static boolean doConnect = false;
 static boolean connected = false;
 static BLERemoteCharacteristic* pRemoteCommand;
 static BLERemoteCharacteristic* pRemoteSensor;
+
+const char* ssid     = "WI-FI SSID";
+const char* password = "WI-FI PASS";
+const char* hassServer = "http://192.168.X.XX:8123"; //http://homeassistant.local:8123 does not work for 
+const char* hassToken = "You can generate 'Long-Lived Access Tokens' in http://homeassistant.local:8123/profile ";
+
+const char* sensor_id_temp = "living_room_temp";
+const char* sensor_id_tvoc = "living_room_tvoc";
+const char* sensor_id_hcho = "living_room_hcho";
+const char* sensor_id_co2 = "living_room_co2";
 
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -57,6 +67,11 @@ static void notifyCallback(
 
   notified = true;
   notify_time = time(NULL);
+
+  sendToHass(sensor_id_temp, String(temp));
+  sendToHass(sensor_id_tvoc, String(tvoc));
+  sendToHass(sensor_id_hcho, String(hcho));
+  sendToHass(sensor_id_co2, String(co2));
 }
 
 void sendCalibration() {
@@ -65,6 +80,44 @@ void sendCalibration() {
   pRemoteCommand->writeValue(command_ad, sizeof(command_ad));
   delay(500);
 } 
+
+void sendToHass(String sansor_id, String value) {
+  if(WiFi.status() != WL_CONNECTED){
+    Serial.println("WiFi not connected");
+    return;
+  }
+  
+  HTTPClient http;
+
+  String serverPath = String(hassServer) + "/api/states/sensor." + sansor_id;
+  
+  // Your Domain name with URL path or IP address with path
+  http.begin(serverPath.c_str());
+
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  http.addHeader("Authorization", "Bearer " + String(hassToken));
+
+  String httpRequestData = "{ \"state\": \"" + value + "\"}";           
+  // Send HTTP POST request
+  int httpResponseCode = http.POST(httpRequestData);
+  
+  if (httpResponseCode>0) {
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    String payload = http.getString();
+    Serial.println(payload);
+  }
+  else {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+  }
+  // Free resources
+  http.end();
+
+  Serial.println();
+  Serial.println("closing connection");
+}
+
 
 bool connectToServer(BLEAddress pAddress) {
   Serial.print("Forming a connection to ");
@@ -106,11 +159,10 @@ bool connectToServer(BLEAddress pAddress) {
   delay(2000);
 #endif
 
-  notified = false;
+notified = false;
   notify_time = time(NULL);
   Serial.println("send register notify");
   pRemoteSensor->registerForNotify(notifyCallback);
-  M5.dis.drawpix(0, 0x0000f0); // blue
   delay(500);
 
   time_t t = time(NULL);
@@ -120,7 +172,7 @@ bool connectToServer(BLEAddress pAddress) {
                               (byte)(tm->tm_hour), (byte)(tm->tm_min), (byte)(tm->tm_sec) };
   pRemoteCommand->writeValue(command_aa, sizeof(command_aa));
   delay(500);
-   
+    
   Serial.println("send notify interval 'ae'");
   byte command_ae[] = { 0xae, 0x01, 0x01 }; // notify every 1min
   pRemoteCommand->writeValue(command_ae, sizeof(command_ae));
@@ -153,8 +205,6 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 
 
 void setup() {
-  M5.begin(true, false, true);
-  setCpuFrequencyMhz(80);
   Serial.begin(115200);
   Serial.println("waiting to connect");
   BLEDevice::init("");
@@ -162,17 +212,38 @@ void setup() {
   Serial.println("getScan");
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   Serial.println("setAdvertisedDeviceCallbacks");
-  Serial.print("connetc to "); Serial.println(DEVICE_NAME);
+  Serial.print("connetc to "); 
+  Serial.println(DEVICE_NAME);
   pBLEScan->setActiveScan(true);
   pBLEScan->start(10);
   Serial.println("");
   Serial.println("End of BLE setup");
+
+  initWiFi();
 }
+
+void initWiFi() {
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP()); 
+}
+
 
 int notifyRequest = 0;
 
-void loop()
-{
+void loop(){
   if (doConnect == true) {
     if (connectToServer(*pServerAddress)) {
       Serial.println("We are now connected to the BLE Server.");
